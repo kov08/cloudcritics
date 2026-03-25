@@ -1,0 +1,27 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Environment Variables (CRITICAL: Never commit .env)
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# AWS Credentials / Serverless artifacts
+.aws/
+.serverless/
+*.zip
+
+# Build outputs
+frontend/build/
+backend/dist/
+.next/
+out/
+
+# Logs
+logs
+*.log
+npm-debug.log*
