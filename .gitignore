@@ -32,3 +32,5 @@ npm-debug.log*
 *.tfstate
 *.tfstate.backup
 .terraform.tfstate.lock.info
+LICENENCE.txt
+.terraform.lock.hcl
