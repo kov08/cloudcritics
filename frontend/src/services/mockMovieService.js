@@ -1,10 +1,13 @@
 import apiClient from "../api/client";
 
 export const movieService = {
-  searchMovies: async (query) => {
+  searchMovies: async (query, config = {}) => {
     // MOCK IMPLEMENTATION: Simulating network latency and returning static data
-    return new Promise((resolve) => {
-      setTimeout(() => {
+    return new Promise((resolve, reject) => {
+      if (config.signal?.aborted) {
+        reject(new DOMException("Aborted", "AbortError"));
+      }
+      const timer = setTimeout(() => {
         resolve({
           data: {
             results: [
@@ -16,6 +19,11 @@ export const movieService = {
           },
         });
       }, 800);
+
+      config.signal?.addEventListener("abort", () => {
+        clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      });
     });
 
     // FUTURE IMPLEMENTATION:
