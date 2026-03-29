@@ -1,4 +1,13 @@
 {
+  {
+  "name": "cloudcritics-backend",
+  "version": "1.0.0",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest"
+  },
   "dependencies": {
     "aws-jwt-verify": "^5.1.1",
     "axios": "^1.14.0",
