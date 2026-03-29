@@ -1,0 +1,17 @@
+version: "3.8"
+services:
+  backend:
+    build:
+      context: ./backend
+      target: builder # Use the builder stage so nodemon works
+    volumes:
+      - ./backend:/app
+      - /app/node_modules # Prevent local node_modules from overriding container's
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - COGNITO_USER_POOL_ID=${REACT_APP_COGNITO_USER_POOL_ID}
+      - COGNITO_CLIENT_ID=${REACT_APP_COGNITO_CLIENT_ID}
+    command: npm run dev # Use nodemon for hot-reloading
