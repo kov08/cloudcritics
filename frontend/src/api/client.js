@@ -1,6 +1,6 @@
 import axios from "axios";
+import { authService } from "../services/authService";
 
-// Create a centralized Axios instance
 const apiClient = axios.create({
   baseURL: process.env.REACT_APP_API_URL || "http://localhost:3001/api",
   timeout: 10000,
@@ -9,12 +9,16 @@ const apiClient = axios.create({
   },
 });
 
-// Request Interceptor: Attach JWT token if it exists
+let memoryToken = null;
+export const setApiToken = (token) => {
+  memoryToken = token;
+};
+
+// Request Interceptor: Attach token to every request
 apiClient.interceptors.request.use(
   (config) => {
-    const token = sessionStorage.getItem("authToken");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (memoryToken) {
+      config.headers.Authorization = `Bearer ${memoryToken}`;
     }
     return config;
   },
@@ -23,17 +27,30 @@ apiClient.interceptors.request.use(
   },
 );
 
-// Response Interceptor: Global error handling
+// Response Interceptor: Global error handling & token refresh logic
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    // handle completely dead network
     if (!error.response) {
       console.error("Network/Server error. Please check your connection.");
       return Promise.reject(new Error("Network error occurred."));
     }
-    if (error.response.status === 401) {
-      console.error("Unauthorized. Session expired.");
-      // Call a centralized logout function
+
+    const originalRequest = error.config;
+    if (error.response.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      try {
+        const newToken = await authService.refreshToken();
+        setApiToken(newToken);
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return apiClient(originalRequest);
+      } catch (error) {
+        console.error("Session Expired, forcing Logout.");
+        authService.logout();
+        window.location.href = "/login";
+        return Promise.reject(error);
+      }
     }
     return Promise.reject(error);
   },
