@@ -70,17 +70,16 @@ export async function handler(event, context, isRetry = false) {
     if (error.response?.status === 401) {
       console.warn("401 Unauthorized. Wiping cache.");
       cachedApiKey = null; // Wipe the bad key
-      
+
       if (!isRetry) {
         console.log("Retrying the handler one time with fresh cache.");
         return await exports.handler(event, context, true);
       }
 
       return {
-        statusCode = 502,
-        body: JSON.stringify({ error: "Upstream auth failed twice." })
-
-      }
+        statusCode: 502,
+        body: JSON.stringify({ error: "Upstream auth failed twice." }),
+      };
     } else if (error.code === "ECONNABORTED") {
       statusCode = 504;
       errorMessage = "Upstream service timeout.";
