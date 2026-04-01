@@ -105,3 +105,66 @@ resource "aws_apigatewayv2_stage" "prod" {
 output "api_gateway_url" {
   value = aws_apigatewayv2_api.api.api_endpoint
 }
+
+# 1. Archive the new Lambda
+data "archive_file" "analyze_sentiment_zip" {
+  type        = "zip"
+  source_dir  = "../serverless/AnalyzeSentiment"
+  output_path = "analyze_sentiment.zip"
+}
+
+# 2. Add Comprehend Permissions to the EXISTING Lambda Execution Role
+resource "aws_iam_role_policy" "lambda_comprehend_access" {
+  name = "${local.env_name}-ComprehendAccessPolicy"
+  role = aws_iam_role.lambda_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "comprehend:BatchDetectSentiment"
+        Resource = "*" # Comprehend doesn't use ARNs for this specific action
+      }
+    ]
+  })
+}
+
+# 3. The Lambda Function
+resource "aws_lambda_function" "analyze_sentiment" {
+  filename         = data.archive_file.analyze_sentiment_zip.output_path
+  function_name    = "${local.env_name}-AnalyzeSentiment"
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "index.handler"
+  runtime          = "nodejs18.x"
+  source_code_hash = data.archive_file.analyze_sentiment_zip.output_base64sha256
+
+  environment {
+    variables = {
+      DYNAMODB_TABLE = aws_dynamodb_table.main_table.name
+    }
+  }
+}
+
+# 4. API Gateway Integration & Route
+resource "aws_apigatewayv2_integration" "sentiment_integration" {
+  api_id           = aws_apigatewayv2_api.api.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = aws_lambda_function.analyze_sentiment.invoke_arn
+}
+
+resource "aws_apigatewayv2_route" "sentiment_route" {
+  api_id             = aws_apigatewayv2_api.api.id
+  route_key          = "GET /sentiment"
+  target             = "integrations/${aws_apigatewayv2_integration.sentiment_integration.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.cognito_auth.id
+}
+
+resource "aws_lambda_permission" "api_gw_sentiment" {
+  statement_id  = "AllowExecutionFromAPIGatewaySentiment"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.analyze_sentiment.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+}
