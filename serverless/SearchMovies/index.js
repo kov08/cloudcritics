@@ -3,9 +3,20 @@ import {
   SecretsManagerClient,
   GetSecretValueCommand,
 } from "@aws-sdk/client-secrets-manager";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 
+//Initialize clients globally (TCP connection resuse)
 const secretClient = new SecretsManagerClient({
   region: process.env.AWS_REGION || "us-east-1",
+});
+const ddbClient = new DynamoDBClient({
+  region: process.env.AWS_REGION || "us-east-1",
+});
+
+//Wrap ddb in the Document CLient for native JSON  handling
+const docClient = DynamoDBDocumentClient.from(ddbClient, {
+  marshallOptions: { removeUndefinedValues: true },
 });
 
 // Global cache variable
@@ -15,7 +26,7 @@ const fetchSecret = async () => {
   const secretName = process.env.SECRET_KEY_NAME;
   try {
     const command = new GetSecretValueCommand({ SecretId: secretName });
-    const response = await secretClient.send.command;
+    const response = await secretClient.send(command);
     const secretPayload = JSON.parse(response.secretString);
     return secretPayload.API_KEY;
   } catch (error) {
@@ -24,9 +35,13 @@ const fetchSecret = async () => {
   }
 };
 
-export async function handler(event, context, isRetry = false) {
+export const handler = async (event, context, isRetry = false) => {
   const query =
     event.queryStringParameters && event.queryStringParameters.query;
+
+  // In API Gateway HTTP APIs with JWT authorizer, the user emails are injected here
+  const userEmail =
+    event.requestContext?.authorizer?.jwt?.claims?.email || "anonymous";
 
   if (!query) {
     return {
@@ -45,7 +60,9 @@ export async function handler(event, context, isRetry = false) {
       cachedApiKey = await fetchSecret();
     }
 
-    const response = await axios.get(`${IMDB_API_URL}?Q=${query}`, {
+    //Fetch Movies
+    const IMDB_API_URL = process.env.IMDB_API_URL;
+    const response = await axios.get(`${IMDB_API_URL}?q=${query}`, {
       headers: {
         Authorization: `Bearer ${cachedApiKey}`,
         Accept: "application/json",
@@ -53,13 +70,40 @@ export async function handler(event, context, isRetry = false) {
       timeout: 8000,
     });
 
+    const movieData = response.data;
+
+    // Construct DynamoDB Item according to Single-Table Design
+    const timestamp = new Date().toISOString();
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE,
+      Item: {
+        PK: `USER#${userEmail}`,
+        SK: `SEARCH#${timestamp}`,
+        GSI1PK: `TYPE#SEARCH`,
+        GSI1SK: timestamp,
+        query: query,
+        resultsCount: response.data?.results?.length || 0,
+        createdAt: timestamp,
+      },
+    });
+
+    try {
+      // Await the database write
+      await docClient.send(putCommand);
+    } catch (error) {
+      console.error(
+        "Non-fatal: Failed to write search history to DynamoDB",
+        error,
+      );
+    }
+
     return {
       statusCode: 200,
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ results: response.data }),
+      body: JSON.stringify({ results: movieData }),
     };
   } catch (error) {
     // console.error("Lambda Execution Error: ", error);
@@ -94,4 +138,4 @@ export async function handler(event, context, isRetry = false) {
       body: JSON.stringify({ error: errorMessage }),
     };
   }
-}
+};
