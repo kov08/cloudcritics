@@ -1,9 +1,76 @@
 import { handler } from "../index";
 import axios from "axios";
 import { SecretManagerClient } from "@aws-sdk/client-secrets-manager";
+import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 
 jest.mock("axios");
 jest.mock("@aws/client-secrets-manager");
+jest.mock("@aws-sdk/lib-dynamodb", () => {
+  return {
+    DynamoDBDocumentClient: {
+      from: jest.fn().mocckReturnValue({ send: jest.fn() }),
+    },
+    PutCommand: jest.fn(),
+  };
+});
+
+describe("SearchMovies Lambda with DynamoDB", () => {
+  let mockDocClientSend;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    // Mock Secrets
+    SecretManagerClient.prototype.send = jest
+      .fn()
+      .mockResolvedValue({ SecretString: JSON.stringify({ API_KEY: "mock" }) });
+
+    // Mock Axios
+    axios.get.mockResolvedValue({ data: { results: [{ title: "Batman" }] } });
+
+    // Mock for docClient.send
+    mockDocClientSend = DynamoDBDocumentClient.from().send;
+    mockDocClientSend.mockResolvedValue({});
+  });
+
+  it("writes to DynamoDB and returns movies", async () => {
+    const mockEvent = {
+      queryStringParameters: { query: "Batman" },
+      requestContext: {
+        authorizer: { jwt: { claims: { email: "test@test.com" } } },
+      },
+    };
+    const response = await handler(mockEvent);
+
+    // Verify PutCommand was constructed with correct Partition Key(PK)
+    expect(PutCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        Item: expect.objectContaining({
+          PK: "USER#test@test.com",
+          query: "Batman",
+        }),
+      }),
+    );
+
+    expect(mockDocClientSend).toHaveBeenCalledTimes(1);
+    expect(response.statusCode).toBe(200);
+  });
+
+  it("gracefully handles DynamoDB failure without crashing", async () => {
+    // Force the DB to fail
+    mockDocClientSend.mockRejectedValueOnce(
+      new Error("Provisioned Throughput Exceeded Exception"),
+    );
+
+    const mockEvent = { queryStringParameters: { query: "Batman" } };
+
+    // The handler should still succeed
+    const response = await handler(mockEvent);
+
+    expect(mockDocClientSend).toHaveBeenCalledTimes(1);
+    expect(response.statusCode).toBe(200); // UI still gets data!
+  });
+});
 
 describe("SearchMovies Lambda Handler", () => {
   let mockSend;

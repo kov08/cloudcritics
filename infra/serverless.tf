@@ -40,6 +40,7 @@ resource "aws_lambda_function" "search_movies" {
     variables = {
       IMDB_API_URL = "https://api.imdb.com/v1/search"
       SECRET_KEY_NAME = aws_secretsmanager_secret.imdb_api_key.name
+      DYNAMODB_TABLE  = aws_dynamodb_table.main_table.name
     }
   }
 }
